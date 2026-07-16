@@ -11,8 +11,8 @@ workers = {
     "Finn":   22,
 }
 
-# Who can act as a supervisor (needed for skill constraint later)
-supervisors = ["Aroha", "Ben"]
+# Who can act as a supervisor (needed for skill constraint)
+supervisors = ["Aroha", "Ben", "Chloe"]
 
 # The shifts. We'll label them by day + period.
 days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -39,6 +39,19 @@ for d in days:
         else:
             required[(d, p)] = 1   # lunches are quiet
 
+# Shifts each worker cannot work (study, second job, etc.)
+unavailable = {
+    "Aroha":  [("Sun", "Lunch"), ("Sun", "Dinner")],
+    "Ben":    [("Mon", "Lunch"), ("Tue", "Lunch")],
+    "Chloe":  [("Wed", "Dinner"), ("Thu", "Dinner")],
+    "Daniel": [("Sat", "Lunch")],
+    "Esi":    [("Fri", "Lunch"), ("Fri", "Dinner")],
+    "Finn":   [],
+}
+
+# Maximum hours any one worker can be rostered in the week
+MAX_HOURS = 30
+
 # ---- The optimisation model ----
 from pulp import LpProblem, LpVariable, LpMinimize, lpSum, value, PULP_CBC_CMD
 
@@ -58,9 +71,27 @@ def cost(w, s):
 # Objective: minimise total wage bill
 prob += lpSum(cost(w, s) * x[(w, s)] for w in workers for s in shifts)
 
-# Coverage: each shift needs enough staff
+# --- Availability: a worker cannot be assigned a shift they can't work ---
+for w in workers:
+    for s in unavailable[w]:
+        prob += x[(w, s)] == 0
+
+# --- Coverage: each shift needs enough staff ---
 for s in shifts:
     prob += lpSum(x[(w, s)] for w in workers) >= required[s]
+
+# --- Max hours: nobody works more than MAX_HOURS in the week ---
+for w in workers:
+    prob += lpSum(shift_hours[s[1]] * x[(w, s)] for s in shifts) <= MAX_HOURS
+
+# --- Skill mix: at least one supervisor on every shift ---
+for s in shifts:
+    prob += lpSum(x[(w, s)] for w in supervisors) >= 1
+
+# --- Rest: no worker does both lunch and dinner on the same day ---
+for w in workers:
+    for d in days:
+        prob += x[(w, (d, "Lunch"))] + x[(w, (d, "Dinner"))] <= 1
 
 prob.solve(PULP_CBC_CMD(msg=0))
 
