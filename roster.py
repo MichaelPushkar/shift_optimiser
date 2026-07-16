@@ -53,7 +53,7 @@ unavailable = {
 MAX_HOURS = 30
 
 # ---- The optimisation model ----
-from pulp import LpProblem, LpVariable, LpMinimize, lpSum, value, PULP_CBC_CMD
+from pulp import LpProblem, LpVariable, LpMinimize, lpSum, value, PULP_CBC_CMD, LpStatus
 
 prob = LpProblem("staff_rostering", LpMinimize)
 
@@ -95,9 +95,45 @@ for w in workers:
 
 prob.solve(PULP_CBC_CMD(msg=0))
 
-print("Status:", prob.status)
-print("Total weekly cost: $", value(prob.objective))
-print()
-for s in shifts:
-    assigned = [w for w in workers if x[(w, s)].value() == 1]
-    print(f"{s[0]} {s[1]:<7} needs {required[s]}  ->  {assigned}")
+# ---- Results ----
+status = LpStatus[prob.status]
+print(f"Status: {status}")
+print(f"Total weekly cost: ${value(prob.objective):,.2f}\n")
+
+# Weekly roster grid: staff down the side, shifts across the top
+header = f"{'':<8}" + "".join(f"{d[:3]:>12}" for d in days)
+print(header)
+print(f"{'':<8}" + "".join(f"{'L / D':>12}" for d in days))
+print("-" * len(header))
+for w in workers:
+    row = f"{w:<8}"
+    for d in days:
+        l = "L" if x[(w, (d, "Lunch"))].value() == 1 else "."
+        dn = "D" if x[(w, (d, "Dinner"))].value() == 1 else "."
+        row += f"{l + ' / ' + dn:>12}"
+    print(row)
+
+# Hours and pay per worker
+print("\nPer-worker summary")
+print(f"{'Worker':<8}{'Hours':>8}{'Rate':>8}{'Pay':>10}")
+for w in workers:
+    hrs = sum(shift_hours[s[1]] for s in shifts if x[(w, s)].value() == 1)
+    print(f"{w:<8}{hrs:>8}{workers[w]:>8}{hrs * workers[w]:>10.2f}")
+
+# ---- Chart: cost per day ----
+import matplotlib.pyplot as plt
+
+daily_cost = []
+for d in days:
+    c = sum(cost(w, s) * x[(w, s)].value()
+            for w in workers for s in shifts if s[0] == d)
+    daily_cost.append(c)
+
+plt.figure(figsize=(8, 4))
+plt.bar(days, daily_cost, color="#4a7ba7")
+plt.title(f"Optimised labour cost by day (total ${value(prob.objective):,.0f})")
+plt.ylabel("Cost (NZD)")
+plt.tight_layout()
+plt.savefig("roster_cost.png", dpi=150)
+print("\nChart saved to roster_cost.png")
+plt.show()
