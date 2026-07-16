@@ -39,8 +39,34 @@ for d in days:
         else:
             required[(d, p)] = 1   # lunches are quiet
 
-# ---- Quick check: print what we've set up ----
-print("Workers:", list(workers.keys()))
-print("Total shifts in the week:", len(shifts))
-print("Staff needed on Fri Dinner:", required[("Fri", "Dinner")])
-print("Staff needed on Mon Lunch:", required[("Mon", "Lunch")])
+# ---- The optimisation model ----
+from pulp import LpProblem, LpVariable, LpMinimize, lpSum, value, PULP_CBC_CMD
+
+prob = LpProblem("staff_rostering", LpMinimize)
+
+# Decision variables: x[(w,s)] = 1 if worker w works shift s
+x = {}
+for w in workers:
+    for s in shifts:
+        x[(w, s)] = LpVariable(f"x_{w}_{s[0]}_{s[1]}", cat="Binary")
+
+# Cost of putting worker w on shift s
+def cost(w, s):
+    day, period = s
+    return workers[w] * shift_hours[period]
+
+# Objective: minimise total wage bill
+prob += lpSum(cost(w, s) * x[(w, s)] for w in workers for s in shifts)
+
+# Coverage: each shift needs enough staff
+for s in shifts:
+    prob += lpSum(x[(w, s)] for w in workers) >= required[s]
+
+prob.solve(PULP_CBC_CMD(msg=0))
+
+print("Status:", prob.status)
+print("Total weekly cost: $", value(prob.objective))
+print()
+for s in shifts:
+    assigned = [w for w in workers if x[(w, s)].value() == 1]
+    print(f"{s[0]} {s[1]:<7} needs {required[s]}  ->  {assigned}")
